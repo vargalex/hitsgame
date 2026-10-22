@@ -77,6 +77,11 @@ crop_marks = false
 # the audio checksum) and fades in and out. Set to 0 or omit to encode the
 # entire track.
 clip_seconds = 40
+
+# Target loudness in LUFS (EBU R128) to normalize every track to, so quiet and
+# loud tracks play at a similar volume. -14 is what YouTube and Spotify use.
+# Set to 0 or omit to leave the volume as-is.
+loudness = -14
 ```
 
 For the webserver, you need to configure it to serve the `.mp4` files with

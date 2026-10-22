@@ -142,15 +142,15 @@ class Track(NamedTuple):
     def out_fname(self) -> str:
         return self.md5sum + ".mp4"
 
-    def clip_args(self, config: Config) -> Tuple[List[str], List[str]]:
+    def clip_args(self, config: Config) -> Tuple[List[str], List[str], List[str]]:
         """
-        Return the ffmpeg input and output arguments that cut a clip of
-        `config.clip_seconds` out of the track, with a short fade in and out.
-        The start of the clip is derived from the md5sum, so it is the same
-        on every run, but differs per track.
+        Return the ffmpeg input arguments, output arguments, and audio filters
+        that cut a clip of `config.clip_seconds` out of the track, with a short
+        fade in and out. The start of the clip is derived from the md5sum, so
+        it is the same on every run, but differs per track.
         """
         if config.clip_seconds <= 0:
-            return [], []
+            return [], [], []
 
         duration = ffprobe_duration(self.fname)
         clip_s = min(config.clip_seconds, duration)
@@ -164,13 +164,48 @@ class Track(NamedTuple):
         start_s = min_start + frac * (max_start - min_start)
 
         in_args = ["-ss", f"{start_s:.3f}"]
-        out_args = [
-            "-t",
-            f"{clip_s:.3f}",
-            "-af",
-            f"afade=t=in:d={fade_s},afade=t=out:st={clip_s - fade_s:.3f}:d={fade_s}",
+        out_args = ["-t", f"{clip_s:.3f}"]
+        filters = [
+            f"afade=t=in:d={fade_s}",
+            f"afade=t=out:st={clip_s - fade_s:.3f}:d={fade_s}",
         ]
-        return in_args, out_args
+        return in_args, out_args, filters
+
+    def loudnorm_filters(
+        self, config: Config, in_args: List[str], out_args: List[str]
+    ) -> List[str]:
+        """
+        Return audio filters that normalize the loudness of the (clipped,
+        mono) track to `config.loudness` LUFS. This measures the track in a
+        first pass, so the second pass can apply a plain gain instead of
+        dynamic compression.
+        """
+        if config.loudness == 0:
+            return []
+
+        target = f"loudnorm=I={config.loudness}:TP=-1.5:LRA=11"
+        # Measure the mono downmix, that is what ends up in the output.
+        mono = "aformat=channel_layouts=mono"
+        # fmt:off
+        result = subprocess.run([
+            "ffmpeg", "-hide_banner", "-nostats",
+            *in_args,
+            "-i", self.fname,
+            "-map", "0:a",
+            *out_args,
+            "-af", f"{mono},{target}:print_format=json",
+            "-f", "null", "-",
+        ], stderr=subprocess.PIPE, encoding="utf-8", check=True)
+        # fmt:on
+        # The measurements are printed as a json object near the end of stderr,
+        # followed by ffmpeg's usual summary lines.
+        m, _ = json.JSONDecoder().raw_decode(result.stderr, result.stderr.rindex("{"))
+        return [
+            mono,
+            f"{target}:measured_I={m['input_i']}:measured_TP={m['input_tp']}"
+            f":measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}"
+            f":offset={m['target_offset']}:linear=true",
+        ]
 
     def encode_to_out(self, config: Config) -> None:
         """
@@ -181,7 +216,10 @@ class Track(NamedTuple):
         out_fname = os.path.join("out", self.out_fname())
         if os.path.isfile(out_fname):
             return
-        clip_in_args, clip_out_args = self.clip_args(config)
+        clip_in_args, clip_out_args, fade_filters = self.clip_args(config)
+        filters = self.loudnorm_filters(config, clip_in_args, clip_out_args)
+        filters += fade_filters
+        filter_args = ["-af", ",".join(filters)] if filters else []
         # fmt:off
         subprocess.check_call([
             "ffmpeg",
@@ -201,10 +239,13 @@ class Track(NamedTuple):
             # Downmix stereo to mono (audio channels = 1). When we play the
             # game we listen on a phone speaker or bluetooth speaker anyway.
             "-ac", "1",
+            # The loudnorm filter outputs 192kHz, bring that back to normal.
+            "-ar", "48000",
             # Encode as AAC at 192kbps.
             "-b:a", "192k",
             "-c:a", "aac",
             *clip_out_args,
+            *filter_args,
             out_fname,
         ])
         # fmt:on
@@ -241,6 +282,10 @@ class Config(NamedTuple):
     # Length of the clip to cut out of every track, in seconds. Set to 0 to
     # encode the entire track.
     clip_seconds: float = 0
+
+    # Target loudness in LUFS (EBU R128) to normalize every track to, e.g.
+    # -14 like YouTube and Spotify. Set to 0 to leave the volume as-is.
+    loudness: float = 0
 
     @staticmethod
     def load(fname: str) -> Config:
