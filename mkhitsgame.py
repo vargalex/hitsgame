@@ -164,7 +164,7 @@ def line_break_text(s: str) -> List[str]:
     diff = char_count
 
     # Try line-breaking between every word.
-    for i in range(1, len(words) - 1):
+    for i in range(1, len(words)):
         w1, w2 = words[:i], words[i:]
         t, b = " ".join(w1), " ".join(w2)
         d = abs(len(t) - len(b))
