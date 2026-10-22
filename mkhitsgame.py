@@ -98,8 +98,11 @@ class Track(NamedTuple):
             # Disable this by copying from the non-existing file -1 instead.
             "-map_metadata", "-1",
             # Really disable metadata writing, including the encoder tag.
-            "-write_xing", "0",
-            "-id3v2_version", "0",
+            "-fflags", "+bitexact",
+            "-flags", "+bitexact",
+            # Put the index at the start of the file, so browsers can start
+            # playing before the whole file is downloaded.
+            "-movflags", "+faststart",
             # Downmix stereo to mono (audio channels = 1). When we play the
             # game we listen on a phone speaker or bluetooth speaker anyway.
             "-ac", "1",
