@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import os.path
 import subprocess
@@ -44,6 +45,45 @@ def metaflac_get_tags(fname: str) -> Tuple[str, Dict[str, str]]:
     return md5sum, {k.upper(): v for k, v in tags}
 
 
+def ffprobe_get_tags(fname: str) -> Tuple[str, Dict[str, str]]:
+    """
+    Return the metadata tags from any audio file that ffmpeg can read (mp3,
+    m4a, ogg, opus, wav, ...). Like metaflac_get_tags, returns an md5sum of
+    the decoded audio data as well, so retagging the file does not change the
+    output file name.
+    """
+    out = subprocess.check_output(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format_tags:stream_tags",
+            "-of",
+            "json",
+            fname,
+        ],
+        encoding="utf-8",
+    )
+    probe = json.loads(out)
+    # Vorbis-style containers (ogg, opus) store the tags on the stream, the
+    # others on the container. Merge them, container tags take precedence.
+    tags: Dict[str, str] = {}
+    for stream in probe.get("streams", []):
+        tags.update(stream.get("tags", {}))
+    tags.update(probe.get("format", {}).get("tags", {}))
+
+    out = subprocess.check_output(
+        ["ffmpeg", "-v", "error", "-i", fname, "-map", "0:a", "-f", "md5", "-"],
+        encoding="utf-8",
+    )
+    md5sum = out.strip().removeprefix("MD5=")
+    return md5sum, {k.upper(): v for k, v in tags.items()}
+
+
+INPUT_EXTENSIONS = (".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav")
+
+
 class Track(NamedTuple):
     year: int
     fname: str
@@ -57,7 +97,10 @@ class Track(NamedTuple):
         """
         Create a track from an input filename.
         """
-        md5sum, tags = metaflac_get_tags(fname)
+        if fname.endswith(".flac"):
+            md5sum, tags = metaflac_get_tags(fname)
+        else:
+            md5sum, tags = ffprobe_get_tags(fname)
         title = tags.get("TITLE")
         artist = tags.get("ARTIST")
         date = tags.get("ORIGINALDATE", tags.get("DATE"))
@@ -81,7 +124,7 @@ class Track(NamedTuple):
 
     def encode_to_out(self) -> None:
         """
-        Encode the input flac file to an mp4 file in the output directory,
+        Encode the input audio file to an mp4 file in the output directory,
         under an unpredictable (but reproducible) name based on the audio
         md5sum. The resulting file has all metadata removed on purpose.
         """
@@ -349,7 +392,7 @@ def main() -> None:
     decade_counts: Counter[int] = Counter()
 
     for fname in os.listdir(track_dir):
-        if not fname.endswith(".flac"):
+        if not fname.endswith(INPUT_EXTENSIONS):
             continue
         fname_full = os.path.join(track_dir, fname)
         track = Track.load(config, fname_full)

@@ -10,8 +10,9 @@ needed to play. The program generates a pdf with cards like this:
 
 Ingredients:
 
- * A collection of properly tagged flac files. These files must have the
-   `TITLE`, `ARTIST`, and `ORIGINALDATE` or `DATE` tags set.
+ * A collection of properly tagged audio files (flac, mp3, m4a, ogg, opus
+   or wav). These files must have the `TITLE`, `ARTIST`, and `ORIGINALDATE`
+   or `DATE` tags set.
  * A webserver that can serve static files.
  * Sheets of A4 paper, preferably 180 g/m².
  * Tokens from the original Hitster game, or a suitable replacement,
@@ -28,7 +29,8 @@ Software tools needed:
    run with `nix develop --command ./mkhitsgame.py`.
  * Or install manually:
    * Python ≥ 3.11 with `qrcode==7.4.2` package.
-   * ffmpeg 5.1.3 or n6.1.
+   * ffmpeg 5.1.3 or n6.1 (including ffprobe).
+   * metaflac (from flac), only needed for flac input.
    * rsvg-convert (from librsvg) 2.55.1 or 2.57.1.
 
 ## Preparation
