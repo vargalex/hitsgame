@@ -36,7 +36,9 @@ Software tools needed:
 ## Preparation
 
  1. Create a directory named `tracks` and put the tracks in there that you want
-    to include.
+    to include. Alternatively, `fetchtracks.py` can fill it from YouTube
+    (requires `yt-dlp`): give it a file with one `Artist | Title | Year` line
+    per track, optionally followed by `| <YouTube url>`, see `fetchtracks.py --help`.
  2. Create a file named `mkhitsgame.toml` next to the `tracks` directory, and
     add the configuration as shown in the next section.
  3. Run `mkhitsgame.py`. It will print statistics about the track distribution
