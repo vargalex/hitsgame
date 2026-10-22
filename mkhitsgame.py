@@ -81,6 +81,26 @@ def ffprobe_get_tags(fname: str) -> Tuple[str, Dict[str, str]]:
     return md5sum, {k.upper(): v for k, v in tags.items()}
 
 
+def ffprobe_duration(fname: str) -> float:
+    """
+    Return the duration of the audio file in seconds.
+    """
+    out = subprocess.check_output(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            fname,
+        ],
+        encoding="utf-8",
+    )
+    return float(out)
+
+
 INPUT_EXTENSIONS = (".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav")
 
 
@@ -122,7 +142,37 @@ class Track(NamedTuple):
     def out_fname(self) -> str:
         return self.md5sum + ".mp4"
 
-    def encode_to_out(self) -> None:
+    def clip_args(self, config: Config) -> Tuple[List[str], List[str]]:
+        """
+        Return the ffmpeg input and output arguments that cut a clip of
+        `config.clip_seconds` out of the track, with a short fade in and out.
+        The start of the clip is derived from the md5sum, so it is the same
+        on every run, but differs per track.
+        """
+        if config.clip_seconds <= 0:
+            return [], []
+
+        duration = ffprobe_duration(self.fname)
+        clip_s = min(config.clip_seconds, duration)
+        fade_s = 1.0
+
+        # Start somewhere between 15% and 70% into the track, to skip quiet
+        # intros and outros, but make sure the clip still fits.
+        frac = int(self.md5sum[:8], 16) / 0xFFFFFFFF
+        max_start = min(0.70 * duration, duration - clip_s)
+        min_start = min(0.15 * duration, max_start)
+        start_s = min_start + frac * (max_start - min_start)
+
+        in_args = ["-ss", f"{start_s:.3f}"]
+        out_args = [
+            "-t",
+            f"{clip_s:.3f}",
+            "-af",
+            f"afade=t=in:d={fade_s},afade=t=out:st={clip_s - fade_s:.3f}:d={fade_s}",
+        ]
+        return in_args, out_args
+
+    def encode_to_out(self, config: Config) -> None:
         """
         Encode the input audio file to an mp4 file in the output directory,
         under an unpredictable (but reproducible) name based on the audio
@@ -131,9 +181,11 @@ class Track(NamedTuple):
         out_fname = os.path.join("out", self.out_fname())
         if os.path.isfile(out_fname):
             return
+        clip_in_args, clip_out_args = self.clip_args(config)
         # fmt:off
         subprocess.check_call([
             "ffmpeg",
+            *clip_in_args,
             "-i", self.fname,
             # Copy the audio stream, and no other stream (no cover art).
             "-map", "0:a",
@@ -152,6 +204,7 @@ class Track(NamedTuple):
             # Encode as AAC at 192kbps.
             "-b:a", "192k",
             "-c:a", "aac",
+            *clip_out_args,
             out_fname,
         ])
         # fmt:on
@@ -184,6 +237,10 @@ class Config(NamedTuple):
 
     # Whether to include crop marks in the output that indicate where to cut.
     crop_marks: bool
+
+    # Length of the clip to cut out of every track, in seconds. Set to 0 to
+    # encode the entire track.
+    clip_seconds: float = 0
 
     @staticmethod
     def load(fname: str) -> Config:
@@ -396,7 +453,7 @@ def main() -> None:
             continue
         fname_full = os.path.join(track_dir, fname)
         track = Track.load(config, fname_full)
-        track.encode_to_out()
+        track.encode_to_out(config)
         tracks.append(track)
 
     tracks.sort()

@@ -71,6 +71,12 @@ grid = true
 # Whether to include crop marks at the sides of the page. If you are cutting
 # with a paper cutter, you should enable this to know where to cut.
 crop_marks = false
+
+# Length of the clip to cut out of every track, in seconds. The clip starts
+# somewhere between 15% and 70% into the track (fixed per track, derived from
+# the audio checksum) and fades in and out. Set to 0 or omit to encode the
+# entire track.
+clip_seconds = 40
 ```
 
 For the webserver, you need to configure it to serve the `.mp4` files with
